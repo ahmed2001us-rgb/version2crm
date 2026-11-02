@@ -1,0 +1,41 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Rep CRM self-test</title>
+<style>body{font:15px system-ui;margin:16px;max-width:700px}.ok{color:#2e7d32}.bad{color:#c0392b;font-weight:700}small{color:#777}button{padding:10px 14px;margin:4px 4px 4px 0}#t,#net{font-size:12px}</style></head><body>
+<h2>Rep CRM self-test</h2><p><a href="./">← back to the app</a></p>
+<button id="run">Run all tests</button><button id="mk">Save reopen-marker</button><p id="mkinfo"></p><div id="out"></div>
+<div hidden><div id="top"></div><span id="net"></span><div id="app"></div><nav id="nav"></nav><div id="m"></div></div><div id="t"></div>
+<script src="vendor/dexie.min.js" onerror="void 0"></script><script src="shim.js"></script><script src="app.js"></script>
+<script>
+const out=document.getElementById('out'),ASSETS=['./','./index.html','./app.js','./shim.js','./vendor/dexie.min.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png','./icons/maskable-512.png','./selftest.html'];
+let fails=0;const log=(ok,n,i)=>{if(!ok)fails++;out.insertAdjacentHTML('beforeend','<div class="'+(ok?'ok':'bad')+'">'+(ok?'PASS':'FAIL')+' — '+n+(i?' <small>'+i+'</small>':'')+'</div>')};
+const wait=()=>new Promise(r=>setTimeout(r,400)),inDb=async(s,id)=>!!(await db.table(s).get(id));
+async function marker(){const m=await db.table('meta').get('selftest-marker');document.getElementById('mkinfo').textContent=m?'Marker found from '+m.at+' (data survived closing/reopening).':'No marker saved yet.'}
+document.getElementById('mk').onclick=async()=>{await db.table('meta').put({id:'selftest-marker',at:new Date().toLocaleString()});marker()};
+document.getElementById('run').onclick=async()=>{out.innerHTML='';fails=0;try{await appReady;
+log(db.verno>=2,'Database open (Dexie), schema version '+db.verno);
+log(!!(navigator.serviceWorker&&navigator.serviceWorker.controller),'Service worker controls this page','If FAIL: reload this page once, then run again');
+for(const a of ASSETS)log(!!(await caches.match(a,{ignoreSearch:true})),'Cached for offline: '+a);
+try{const m=await (await fetch('./manifest.webmanifest')).json();log(m.icons.length>=3&&m.display==='standalone'&&m.start_url==='./'&&m.scope==='./','Manifest valid and uses relative paths')}catch(e){log(false,'Manifest','')}
+log(true,'navigator.onLine = '+navigator.onLine,'Run again in airplane mode: all other tests must still PASS');
+await load();const base=checkIntegrity().length,tag='__TEST__'+Date.now();
+const pr=put('products',{name:tag+'P'}),ph1=put('pharmacies',{name:tag+'Ph'}),dc=put('doctors',{name:tag+'D',cls:'B',days:['Sat'],area:['X'],adopt:'High',patients:20,score:1}),T0=iso(new Date());
+put('links',{doctorId:dc.id,pharmacyId:ph1.id});const vs=put('visits',{doctorId:dc.id,date:T0,status:'planned',productIds:[pr.id]});
+const fb=put('feedback',{doctorId:dc.id,visitId:vs.id,productId:pr.id,pharmacyId:ph1.id,date:T0,kind:'Doctor',text:'test'});
+await wait();
+let ok=true;for(const [s,o] of [['products',pr],['pharmacies',ph1],['doctors',dc],['visits',vs],['feedback',fb]])ok=ok&&await inDb(s,o.id);
+log(ok,'CREATE: product, pharmacy, doctor, visit, feedback saved in IndexedDB');
+await load();log(D.doctors.some(d=>d.id==dc.id)&&D.visits.some(v=>v.id==vs.id),'READ: records reload from the database');
+put('doctors',{...dc,phone:'555'});await wait();log((await db.table('doctors').get(dc.id)).phone==='555','UPDATE persisted');
+log(checkIntegrity().length===base,'Relationships valid (doctor-pharmacy-product-visit-feedback)');
+log(csv(rowsOf('doctors')).split('\n')[0].includes('name'),'CSV export has a header row');
+log(JSON.parse(JSON.stringify({data:D})).data.doctors.length===D.doctors.length,'JSON export round-trip');
+cascade('products',pr);await wait();await load();
+log(!D.visits.find(v=>v.id==vs.id).productIds.includes(pr.id)&&D.feedback.find(f=>f.id==fb.id).productId==='','DELETE product: unlinked from visit and feedback');
+cascade('visits',vs);await wait();await load();log(D.feedback.find(f=>f.id==fb.id).visitId==='','DELETE visit: feedback kept, visit link cleared');
+cascade('pharmacies',ph1);await wait();await load();log(!D.links.some(l=>l.pharmacyId==ph1.id)&&D.feedback.find(f=>f.id==fb.id).pharmacyId==='','DELETE pharmacy: link removed, feedback kept');
+cascade('doctors',dc);await wait();await load();
+log(!D.feedback.some(f=>f.id==fb.id)&&!(await inDb('doctors',dc.id))&&!(await inDb('feedback',fb.id)),'DELETE doctor: feedback removed too');
+log(checkIntegrity().length===base,'No orphan records left after test');
+}catch(e){log(false,'Test crashed: '+e.message)}
+out.insertAdjacentHTML('beforeend','<h3 class="'+(fails?'bad':'ok')+'">'+(fails?fails+' test(s) FAILED':'ALL TESTS PASSED')+'</h3>')};
+appReady.then(marker);
+</script></body></html>
