@@ -1,6 +1,6 @@
 /* Rep CRM service worker. Relative paths only (works under /<repo>/ on GitHub Pages).
    Strategy: network-first (always the newest files when online), cache fallback (works fully offline). */
-const VERSION='repcrm-v12';
+const VERSION='repcrm-v19';
 const ASSETS=['./','./index.html','./app.js','./shim.js','./vendor/dexie.min.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png','./icons/maskable-512.png','./selftest.html'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(VERSION).then(c=>Promise.all(ASSETS.map(a=>c.add(new Request(a,{cache:'reload'})).catch(()=>console.warn('not cached:',a))))).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==VERSION).map(x=>caches.delete(x)))).then(()=>self.clients.claim())));
